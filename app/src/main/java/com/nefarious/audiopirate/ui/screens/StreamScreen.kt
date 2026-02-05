@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import uk.co.undergroundbunker.audiopirate.viewmodel.WebSocketViewModel
@@ -157,6 +158,7 @@ fun StreamScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = connectionState !is ConnectionState.Connected,
                 singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
                 leadingIcon = {
                     Icon(Icons.Filled.Lock, contentDescription = "Password")
                 }

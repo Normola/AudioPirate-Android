@@ -392,45 +392,67 @@ class WebSocketManager {
         val muxer = mediaMuxer ?: return
         
         try {
-            // Feed data to encoder in chunks that fit the buffer
-            val inputBufferIndex = codec.dequeueInputBuffer(10000)
-            if (inputBufferIndex >= 0) {
-                val codecInputBuffer = codec.getInputBuffer(inputBufferIndex)
-                if (codecInputBuffer != null) {
-                    codecInputBuffer.clear()
-                    
-                    // Calculate how much data we can fit (buffer capacity / 2 for shorts)
-                    val maxSamples = codecInputBuffer.capacity() / 2
-                    val samplesToWrite = minOf(pcmData.size, maxSamples)
-                    
-                    // Write samples to buffer
-                    for (i in 0 until samplesToWrite) {
-                        codecInputBuffer.putShort(pcmData[i])
+            // Feed data to encoder in multiple chunks if needed
+            var offset = 0
+            while (offset < pcmData.size) {
+                val inputBufferIndex = codec.dequeueInputBuffer(10000)
+                if (inputBufferIndex >= 0) {
+                    val codecInputBuffer = codec.getInputBuffer(inputBufferIndex)
+                    if (codecInputBuffer != null) {
+                        codecInputBuffer.clear()
+                        
+                        // Calculate how much data we can fit (buffer capacity / 2 for shorts)
+                        val maxSamples = codecInputBuffer.capacity() / 2
+                        val remainingSamples = pcmData.size - offset
+                        val samplesToWrite = minOf(remainingSamples, maxSamples)
+                        
+                        // Write samples to buffer
+                        for (i in 0 until samplesToWrite) {
+                            codecInputBuffer.putShort(pcmData[offset + i])
+                        }
+                        
+                        // Calculate presentation timestamp based on samples encoded
+                        // timestamps are in microseconds
+                        // samplesToWrite is number of individual channel samples (interleaved)
+                        // For proper timestamps, we need to count frames (one sample across all channels)
+                        val framesWritten = samplesToWrite / channels
+                        val presentationTimeUs = (totalSamplesEncoded * 1_000_000L) / sampleRate
+                        totalSamplesEncoded += framesWritten
+                        
+                        if (totalSamplesEncoded < 100000) {  // Log first few seconds
+                            Log.d(TAG, "Encoding: offset=$offset, samples=$samplesToWrite, frames=$framesWritten, totalFrames=$totalSamplesEncoded, timestamp=${presentationTimeUs}us")
+                        }
+                        
+                        codec.queueInputBuffer(
+                            inputBufferIndex, 
+                            0, 
+                            samplesToWrite * 2,  // bytes written
+                            presentationTimeUs, 
+                            0
+                        )
+                        
+                        offset += samplesToWrite
+                    } else {
+                        break
                     }
-                    
-                    // Calculate presentation timestamp based on samples encoded
-                    // timestamps are in microseconds
-                    // samplesToWrite is number of individual channel samples (interleaved)
-                    // For proper timestamps, we need to count frames (one sample across all channels)
-                    val framesWritten = samplesToWrite / channels
-                    val presentationTimeUs = (totalSamplesEncoded * 1_000_000L) / sampleRate
-                    totalSamplesEncoded += framesWritten
-                    
-                    if (totalSamplesEncoded < 100000) {  // Log first few seconds
-                        Log.d(TAG, "Encoding: samples=$samplesToWrite, frames=$framesWritten, totalFrames=$totalSamplesEncoded, timestamp=${presentationTimeUs}us, rate=$sampleRate, channels=$channels")
+                } else {
+                    // No input buffer available, try to drain output first
+                    drainEncoder(codec, muxer)
+                    // If still no space, we'll lose this chunk
+                    if (codec.dequeueInputBuffer(0) < 0) {
+                        break
                     }
-                    
-                    codec.queueInputBuffer(
-                        inputBufferIndex, 
-                        0, 
-                        samplesToWrite * 2,  // bytes written
-                        presentationTimeUs, 
-                        0
-                    )
                 }
             }
             
-            // Get encoded data
+            // Drain encoder output
+            drainEncoder(codec, muxer)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error encoding audio data", e)
+        }
+    }
+    
+    private fun drainEncoder(codec: MediaCodec, muxer: MediaMuxer) {
             val bufferInfo = MediaCodec.BufferInfo()
             var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
             
@@ -459,9 +481,6 @@ class WebSocketManager {
                 
                 outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error encoding audio data", e)
-        }
     }
     
     fun sendMessage(message: String) {

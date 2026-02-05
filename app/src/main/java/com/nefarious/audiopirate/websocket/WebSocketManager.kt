@@ -1,5 +1,8 @@
 package uk.co.undergroundbunker.audiopirate.websocket
 
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +48,12 @@ class WebSocketManager {
     private var authToken: String? = null
     private var password: String = "audiopirate"  // Default password
     
+    // AudioTrack for real-time playback
+    private var audioTrack: AudioTrack? = null
+    private var sampleRate = 48000  // Default from AudioPirate server
+    private var channels = 2  // Stereo
+    private var bitsPerSample = 32  // 32-bit
+    
     fun connect(url: String, password: String = "audiopirate") {
         if (_connectionState.value is ConnectionState.Connected) {
             Log.w(TAG, "Already connected")
@@ -53,6 +62,9 @@ class WebSocketManager {
         
         this.password = password
         _connectionState.value = ConnectionState.Connecting
+        
+        // Initialize AudioTrack for playback
+        initializeAudioTrack()
         
         val request = Request.Builder()
             .url(url)
@@ -107,6 +119,15 @@ class WebSocketManager {
                             val channels = json.optInt("channels")
                             val bitsPerSample = json.optInt("bitsPerSample")
                             Log.d(TAG, "Audio config: ${sampleRate}Hz, ${channels}ch, ${bitsPerSample}bit")
+                            
+                            // Update audio configuration
+                            this@WebSocketManager.sampleRate = sampleRate
+                            this@WebSocketManager.channels = channels
+                            this@WebSocketManager.bitsPerSample = bitsPerSample
+                            
+                            // Reinitialize AudioTrack with new config
+                            reinitializeAudioTrack()
+                            
                             _connectionState.value = ConnectionState.Connected("${sampleRate}Hz ${channels}ch ${bitsPerSample}bit")
                         }
                         "error" -> {
@@ -124,7 +145,25 @@ class WebSocketManager {
                 }
             }
             
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            overridPlay audio in real-time
+                try {
+                    audioTrack?.let { track ->
+                        if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                            track.play()
+                            Log.d(TAG, "Started AudioTrack playback")
+                        }
+                        
+                        // Write audio data to track
+                        val written = track.write(byteArray, 0, byteArray.size)
+                        if (written < 0) {
+                            Log.e(TAG, "Error writing to AudioTrack: $written")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error playing audio", e)
+                }
+                
+                // e fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 val byteArray = bytes.toByteArray()
                 Log.d(TAG, "Received binary message: ${byteArray.size} bytes")
                 
@@ -165,6 +204,7 @@ class WebSocketManager {
     
     fun disconnect() {
         stopRecording()
+        stopAudioPlayback()
         webSocket?.close(1000, "User disconnected")
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
@@ -209,6 +249,74 @@ class WebSocketManager {
     
     fun sendMessage(message: String) {
         webSocket?.send(message)
+    }
+    
+    private fun initializeAudioTrack() {
+        try {
+            val channelConfig = if (channels == 2) {
+                AudioFormat.CHANNEL_OUT_STEREO
+            } else {
+                AudioFormat.CHANNEL_OUT_MONO
+            }
+            
+            val audioFormat = AudioFormat.ENCODING_PCM_FLOAT  // 32-bit float
+            
+            val bufferSize = AudioTrack.getMinBufferSize(
+                sampleRate,
+                channelConfig,
+                audioFormat
+            )
+            
+            if (bufferSize == AudioTrack.ERROR || bufferSize == AudioTrack.ERROR_BAD_VALUE) {
+                Log.e(TAG, "Invalid buffer size: $bufferSize")
+                return
+            }
+            
+            // Use a larger buffer for smoother playback
+            val bufferSizeInBytes = bufferSize * 4
+            
+            audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(audioFormat)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(channelConfig)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSizeInBytes)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            
+            Log.d(TAG, "AudioTrack initialized: ${sampleRate}Hz, ${channels}ch, buffer=${bufferSizeInBytes}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing AudioTrack", e)
+        }
+    }
+    
+    private fun reinitializeAudioTrack() {
+        stopAudioPlayback()
+        initializeAudioTrack()
+    }
+    
+    private fun stopAudioPlayback() {
+        try {
+            audioTrack?.let { track ->
+                if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                    track.stop()
+                }
+                track.release()
+            }
+            audioTrack = null
+            Log.d(TAG, "AudioTrack stopped and released")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping AudioTrack", e)
+        }
     }
     
     companion object {

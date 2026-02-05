@@ -66,7 +66,7 @@ class WebSocketManager {
     // Audio buffering for smoother playback
     private val audioBuffer = mutableListOf<ShortArray>()
     private var isBuffering = true
-    private val bufferThreshold = 3  // Number of packets to buffer before starting playback
+    private val bufferThreshold = 5  // Number of packets to buffer before starting playback (helps with emulator timing)
     
     fun connect(url: String, password: String = "audiopirate") {
         if (_connectionState.value is ConnectionState.Connected) {
@@ -331,8 +331,8 @@ class WebSocketManager {
                 return
             }
             
-            // Use a larger buffer for smoother playback
-            val bufferSizeInBytes = bufferSize * 4
+            // Use a much larger buffer for smoother playback (especially on emulators)
+            val bufferSizeInBytes = bufferSize * 8
             
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
@@ -424,7 +424,7 @@ class WebSocketManager {
     }
     
     private fun applyCrossFade(data: ShortArray): ShortArray {
-        val fadeLength = 256  // Increased from 64 to 256 samples (~5.3ms at 48kHz)
+        val fadeLength = 512  // ~10.7ms at 48kHz for smoother transitions on emulators
         
         val gain = _audioGain.value
         
@@ -473,10 +473,21 @@ class WebSocketManager {
         if (gain == 1.0f) return data  // No change needed
         
         val result = ShortArray(data.size)
+        var clippedSamples = 0
+        
         for (i in data.indices) {
             val amplified = (data[i] * gain).toInt()
+            val original = amplified
             // Clamp to prevent overflow/distortion
             result[i] = amplified.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            
+            if (original != result[i].toInt()) {
+                clippedSamples++
+            }
+        }
+        
+        if (clippedSamples > 0 && gain > 1.0f) {
+            Log.d(TAG, "Audio gain ${(gain * 100).toInt()}%: ${clippedSamples}/${data.size} samples clipped (${(clippedSamples * 100f / data.size).toInt()}%)")
         }
         
         return result

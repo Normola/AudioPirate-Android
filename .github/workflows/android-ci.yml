@@ -79,7 +79,6 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          .gradle
           build
           app/build
         key: ${{ runner.os }}-build-${{ github.sha }}
@@ -128,7 +127,6 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          .gradle
           build
           app/build
         key: ${{ runner.os }}-build-${{ github.sha }}
@@ -184,7 +182,6 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          .gradle
           build
           app/build
         key: ${{ runner.os }}-build-${{ github.sha }}

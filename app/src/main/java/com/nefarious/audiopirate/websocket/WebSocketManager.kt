@@ -63,6 +63,11 @@ class WebSocketManager {
     private var hasPlayedTestTone = false  // Track if we've played the test tone
     private var lastPacketEnd: ShortArray? = null  // Store end of last packet for cross-fading
     
+    // Audio buffering for smoother playback
+    private val audioBuffer = mutableListOf<ShortArray>()
+    private var isBuffering = true
+    private val bufferThreshold = 3  // Number of packets to buffer before starting playback
+    
     fun connect(url: String, password: String = "audiopirate") {
         if (_connectionState.value is ConnectionState.Connected) {
             Log.w(TAG, "Already connected")
@@ -163,30 +168,50 @@ class WebSocketManager {
                 _messageCount.value += 1
                 _lastMessageTime.value = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
                 
-                // Play audio in real-time
+                // Play audio with buffering
                 try {
                     audioTrack?.let { track ->
-                        if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
-                            track.play()
-                            Log.d(TAG, "Started AudioTrack playback")
-                            
-                            // Play test tone on first playback
-                            if (!hasPlayedTestTone) {
-                                playTestTone(track)
-                                hasPlayedTestTone = true
-                            }
-                        }
-                        
                         // Convert 32-bit signed integer PCM to 16-bit PCM
                         val converted16Bit = convert32BitTo16Bit(byteArray)
                         
                         // Apply cross-fade to reduce clicking between packets
                         val smoothed = applyCrossFade(converted16Bit)
                         
-                        // Write audio data to track
-                        val written = track.write(smoothed, 0, smoothed.size)
-                        if (written < 0) {
-                            Log.e(TAG, "Error writing to AudioTrack: $written")
+                        // Add to buffer
+                        synchronized(audioBuffer) {
+                            audioBuffer.add(smoothed)
+                        }
+                        
+                        // Check if we should start playback
+                        if (isBuffering) {
+                            if (audioBuffer.size >= bufferThreshold) {
+                                isBuffering = false
+                                Log.d(TAG, "Buffer filled with ${audioBuffer.size} packets, starting playback")
+                                
+                                if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                                    track.play()
+                                    Log.d(TAG, "Started AudioTrack playback")
+                                    
+                                    // Play test tone on first playback
+                                    if (!hasPlayedTestTone) {
+                                        playTestTone(track)
+                                        hasPlayedTestTone = true
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Play buffered audio
+                        if (!isBuffering) {
+                            synchronized(audioBuffer) {
+                                while (audioBuffer.isNotEmpty()) {
+                                    val packet = audioBuffer.removeAt(0)
+                                    val written = track.write(packet, 0, packet.size)
+                                    if (written < 0) {
+                                        Log.e(TAG, "Error writing to AudioTrack: $written")
+                                    }
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -228,6 +253,13 @@ class WebSocketManager {
         stopAudioPlayback()
         hasPlayedTestTone = false
         lastPacketEnd = null
+        
+        // Clear buffer
+        synchronized(audioBuffer) {
+            audioBuffer.clear()
+        }
+        isBuffering = true
+        
         webSocket?.close(1000, "User disconnected")
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
@@ -392,45 +424,49 @@ class WebSocketManager {
     }
     
     private fun applyCrossFade(data: ShortArray): ShortArray {
-        val fadeLength = 64  // Number of samples to cross-fade
+        val fadeLength = 256  // Increased from 64 to 256 samples (~5.3ms at 48kHz)
         
         val gain = _audioGain.value
         
         // If this is the first packet, just save the end and return
         if (lastPacketEnd == null) {
-            // Apply gain and save the last few samples for next packet
+            // Apply gain first
             val result = applyGain(data, gain)
+            // Save the last samples for next packet
             if (result.size >= fadeLength) {
                 lastPacketEnd = result.copyOfRange(result.size - fadeLength, result.size)
             }
             return result
         }
         
+        // Apply gain to input data first, before cross-fading
+        val gainedData = applyGain(data, gain)
+        
         // Create output array
-        val result = data.copyOf()
+        val result = gainedData.copyOf()
         
         // Cross-fade the beginning of current packet with end of last packet
-        val fadeSize = minOf(fadeLength, data.size, lastPacketEnd!!.size)
+        val fadeSize = minOf(fadeLength, gainedData.size, lastPacketEnd!!.size)
         
         for (i in 0 until fadeSize) {
-            val fadeOut = (fadeSize - i).toFloat() / fadeSize  // 1.0 to 0.0
-            val fadeIn = i.toFloat() / fadeSize                 // 0.0 to 1.0
+            // Cosine-based cross-fade for smoother transition
+            val fadeProgress = i.toFloat() / fadeSize
+            val fadeOut = (Math.cos(fadeProgress * Math.PI).toFloat() + 1.0f) / 2.0f  // 1.0 to 0.0
+            val fadeIn = (Math.cos((1.0f - fadeProgress) * Math.PI).toFloat() + 1.0f) / 2.0f  // 0.0 to 1.0
             
             val lastSample = lastPacketEnd!![lastPacketEnd!!.size - fadeSize + i].toInt()
-            val currentSample = data[i].toInt()
+            val currentSample = gainedData[i].toInt()
             
-            result[i] = ((lastSample * fadeOut + currentSample * fadeIn).toInt()).toShort()
+            val mixed = (lastSample * fadeOut + currentSample * fadeIn).toInt()
+            result[i] = mixed.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
         }
-        
-        // Apply gain to entire packet
-        val gainedResult = applyGain(result, gain)
         
         // Save the end of this packet for next time
-        if (gainedResult.size >= fadeLength) {
-            lastPacketEnd = gainedResult.copyOfRange(gainedResult.size - fadeLength, gainedResult.size)
+        if (result.size >= fadeLength) {
+            lastPacketEnd = result.copyOfRange(result.size - fadeLength, result.size)
         }
         
-        return gainedResult
+        return result
     }
     
     private fun applyGain(data: ShortArray, gain: Float): ShortArray {

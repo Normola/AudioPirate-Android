@@ -9,9 +9,11 @@ A modern Android music streaming app built with Jetpack Compose and Kotlin.
 - **Kotlin** - Primary programming language
 - **MVVM Architecture** - Clean architecture pattern
 - **Navigation Component** - Type-safe navigation
+- **OkHttp WebSocket** - Real-time WebSocket connections
 - **Media3 ExoPlayer** - Audio playback
-- **Retrofit** - Networking
-- **Coroutines** - Asynchronous programming
+- **Room Database** - Local data persistence
+- **Retrofit** - REST API networking
+- **Coroutines & Flow** - Asynchronous programming
 
 ## Requirements
 
@@ -42,23 +44,43 @@ A modern Android music streaming app built with Jetpack Compose and Kotlin.
 ```
 app/
 ├── src/main/
-│   ├── java/com/nefarious/audiopirate/
+│   ├── java/uk/co/undergroundbunker/audiopirate/
+│   │   ├── data/             # Database entities and DAOs
 │   │   ├── ui/
 │   │   │   ├── screens/      # Screen composables
 │   │   │   └── theme/        # Theme configuration
+│   │   ├── viewmodel/        # ViewModels for state management
+│   │   ├── websocket/        # WebSocket connection manager
 │   │   └── MainActivity.kt   # Main entry point
 │   ├── res/                  # Resources (strings, colors, etc.)
 │   └── AndroidManifest.xml
 └── build.gradle.kts
 ```
 
-## Features (Planned)
+## Usage
 
-- 🔍 Search for music
-- ▶️ Stream audio
-- 📥 Download tracks
-- 🎵 Manage downloads
-- ⚙️ Customizable settings
+### WebSocket Streaming
+
+1. **Add a Server** - On the Home screen, tap the + button to add a WebSocket server
+2. **Configure Connection** - Enter server name, WebSocket URL (ws:// or wss://), and description
+3. **Connect** - Tap on a server card or use the Stream tab to connect
+4. **Record Stream** - Once connected, use the recording controls to save audio data
+5. **Monitor** - View real-time statistics of the incoming stream
+
+### Recordings
+
+- Recordings are saved as `.raw` files in the app's external storage
+- Files are named with timestamps: `recording_YYYY-MM-DD_HH-mm-ss.raw`
+- Access recordings through your device's file manager
+
+## Features
+
+- 🌐 **WebSocket Streaming** - Connect to WebSocket audio streams
+- 🎙️ **Stream Recording** - Record live audio streams to files
+- 💾 **Server Management** - Save and manage multiple WebSocket servers
+- 📊 **Stream Statistics** - Monitor received data in real-time
+- 📥 **Download Management** - Manage downloaded tracks
+- ⚙️ **Customizable Settings** - Configure app preferences
 
 ## Development
 

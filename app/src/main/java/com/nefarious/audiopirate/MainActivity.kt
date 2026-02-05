@@ -1,4 +1,4 @@
-package com.nefarious.audiopirate
+package uk.co.undergroundbunker.audiopirate
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,11 +19,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.nefarious.audiopirate.ui.screens.DownloadsScreen
-import com.nefarious.audiopirate.ui.screens.HomeScreen
-import com.nefarious.audiopirate.ui.screens.SearchScreen
-import com.nefarious.audiopirate.ui.screens.SettingsScreen
-import com.nefarious.audiopirate.ui.theme.AudioPirateTheme
+import uk.co.undergroundbunker.audiopirate.ui.screens.DownloadsScreen
+import uk.co.undergroundbunker.audiopirate.ui.screens.HomeScreen
+import uk.co.undergroundbunker.audiopirate.ui.screens.SettingsScreen
+import uk.co.undergroundbunker.audiopirate.ui.screens.StreamScreen
+import uk.co.undergroundbunker.audiopirate.ui.theme.AudioPirateTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,7 +50,7 @@ fun AudioPirateApp() {
                 
                 listOf(
                     NavigationItem("home", "Home", Icons.Filled.Home),
-                    NavigationItem("search", "Search", Icons.Filled.Search),
+                    NavigationItem("stream", "Stream", Icons.Filled.Wifi),
                     NavigationItem("downloads", "Downloads", Icons.Filled.Download),
                     NavigationItem("settings", "Settings", Icons.Filled.Settings)
                 ).forEach { item ->
@@ -77,8 +77,18 @@ fun AudioPirateApp() {
             startDestination = "home",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("home") { HomeScreen() }
-            composable("search") { SearchScreen() }
+            composable("home") { HomeScreen(navController = navController) }
+            composable("stream") { StreamScreen() }
+            composable("stream/{serverUrl}/{password}/{autoConnect}") { backStackEntry ->
+                val serverUrl = backStackEntry.arguments?.getString("serverUrl") ?: ""
+                val password = backStackEntry.arguments?.getString("password") ?: "audiopirate"
+                val autoConnect = backStackEntry.arguments?.getString("autoConnect")?.toBoolean() ?: false
+                StreamScreen(
+                    initialUrl = java.net.URLDecoder.decode(serverUrl, "UTF-8"),
+                    initialPassword = java.net.URLDecoder.decode(password, "UTF-8"),
+                    autoConnect = autoConnect
+                )
+            }
             composable("downloads") { DownloadsScreen() }
             composable("settings") { SettingsScreen() }
         }

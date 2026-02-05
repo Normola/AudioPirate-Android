@@ -1,4 +1,4 @@
-package com.nefarious.audiopirate.ui.theme
+package uk.co.undergroundbunker.audiopirate.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

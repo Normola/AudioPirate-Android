@@ -1,4 +1,4 @@
-package com.nefarious.audiopirate.ui.screens
+package uk.co.undergroundbunker.audiopirate.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons

@@ -3,7 +3,12 @@ package uk.co.undergroundbunker.audiopirate.websocket
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.util.Log
+import java.nio.ByteBuffer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +38,12 @@ class WebSocketManager {
     private var isRecording = false
     private var recordingFile: File? = null
     private var fileOutputStream: FileOutputStream? = null
+    
+    // AAC encoding for compressed audio recordings
+    private var mediaCodec: MediaCodec? = null
+    private var mediaMuxer: MediaMuxer? = null
+    private var audioTrackIndex = -1
+    private var muxerStarted = false
     
     private val _recordingState = MutableStateFlow(false)
     val recordingState: StateFlow<Boolean> = _recordingState.asStateFlow()
@@ -218,10 +229,12 @@ class WebSocketManager {
                     Log.e(TAG, "Error playing audio", e)
                 }
                 
-                // If recording, write to file
+                // If recording, encode audio to AAC
                 if (isRecording) {
                     try {
-                        fileOutputStream?.write(byteArray)
+                        // Convert to 16-bit for encoding
+                        val converted16Bit = convert32BitTo16Bit(byteArray)
+                        encodeAudioData(converted16Bit)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error writing to file", e)
                     }
@@ -277,10 +290,28 @@ class WebSocketManager {
         
         try {
             recordingFile = outputFile
-            fileOutputStream = FileOutputStream(outputFile)
+            
+            // Initialize AAC encoder
+            val format = MediaFormat.createAudioFormat(
+                MediaFormat.MIMETYPE_AUDIO_AAC,
+                sampleRate,
+                channels
+            )
+            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            format.setInteger(MediaFormat.KEY_BIT_RATE, 128000) // 128 kbps
+            
+            mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            mediaCodec?.start()
+            
+            // Initialize muxer
+            mediaMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxerStarted = false
+            audioTrackIndex = -1
+            
             isRecording = true
             _recordingState.value = true
-            Log.d(TAG, "Started recording to ${outputFile.absolutePath}")
+            Log.d(TAG, "Started AAC recording to ${outputFile.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting recording", e)
             stopRecording()
@@ -291,14 +322,86 @@ class WebSocketManager {
         if (!isRecording) return
         
         try {
-            fileOutputStream?.flush()
-            fileOutputStream?.close()
-            fileOutputStream = null
+            // Stop and release encoder
+            mediaCodec?.let { codec ->
+                try {
+                    codec.stop()
+                    codec.release()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping codec", e)
+                }
+            }
+            mediaCodec = null
+            
+            // Stop and release muxer
+            mediaMuxer?.let { muxer ->
+                try {
+                    if (muxerStarted) {
+                        muxer.stop()
+                    }
+                    muxer.release()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping muxer", e)
+                }
+            }
+            mediaMuxer = null
+            muxerStarted = false
+            audioTrackIndex = -1
+            
             isRecording = false
             _recordingState.value = false
             Log.d(TAG, "Stopped recording. File saved: ${recordingFile?.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping recording", e)
+        }
+    }
+    
+    private fun encodeAudioData(pcmData: ShortArray) {
+        val codec = mediaCodec ?: return
+        val muxer = mediaMuxer ?: return
+        
+        try {
+            // Convert ShortArray to ByteBuffer
+            val inputBuffer = ByteBuffer.allocate(pcmData.size * 2)
+            for (sample in pcmData) {
+                inputBuffer.putShort(sample)
+            }
+            inputBuffer.flip()
+            
+            // Feed data to encoder
+            val inputBufferIndex = codec.dequeueInputBuffer(10000)
+            if (inputBufferIndex >= 0) {
+                val codecInputBuffer = codec.getInputBuffer(inputBufferIndex)
+                codecInputBuffer?.clear()
+                codecInputBuffer?.put(inputBuffer)
+                codec.queueInputBuffer(inputBufferIndex, 0, inputBuffer.limit(), System.nanoTime() / 1000, 0)
+            }
+            
+            // Get encoded data
+            val bufferInfo = MediaCodec.BufferInfo()
+            var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+            
+            while (outputBufferIndex >= 0) {
+                if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val newFormat = codec.outputFormat
+                    audioTrackIndex = muxer.addTrack(newFormat)
+                    muxer.start()
+                    muxerStarted = true
+                    Log.d(TAG, "Muxer started with track index: $audioTrackIndex")
+                } else {
+                    val encodedData = codec.getOutputBuffer(outputBufferIndex)
+                    if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                        encodedData.position(bufferInfo.offset)
+                        encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                        muxer.writeSampleData(audioTrackIndex, encodedData, bufferInfo)
+                    }
+                    codec.releaseOutputBuffer(outputBufferIndex, false)
+                }
+                
+                outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error encoding audio data", e)
         }
     }
     

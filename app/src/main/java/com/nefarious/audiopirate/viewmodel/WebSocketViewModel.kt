@@ -62,13 +62,15 @@ class WebSocketViewModel(application: Application) : AndroidViewModel(applicatio
     
     fun startRecording() {
         viewModelScope.launch {
-            val recordingsDir = File(getApplication<Application>().getExternalFilesDir(null), "recordings")
+            // Use public external storage directory (visible to user)
+            val publicStorageDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+            val recordingsDir = File(publicStorageDir, "AudioPirate")
             if (!recordingsDir.exists()) {
                 recordingsDir.mkdirs()
             }
             
             val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
-            val outputFile = File(recordingsDir, "recording_$timestamp.raw")
+            val outputFile = File(recordingsDir, "recording_$timestamp.m4a")
             
             webSocketManager.startRecording(outputFile)
         }

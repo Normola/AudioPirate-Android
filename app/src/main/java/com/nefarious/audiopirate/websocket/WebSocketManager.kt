@@ -292,6 +292,8 @@ class WebSocketManager {
         try {
             recordingFile = outputFile
             
+            Log.d(TAG, "Starting AAC encoder with: sampleRate=$sampleRate, channels=$channels, bitsPerSample=$bitsPerSample")
+            
             // Initialize AAC encoder
             val format = MediaFormat.createAudioFormat(
                 MediaFormat.MIMETYPE_AUDIO_AAC,
@@ -300,6 +302,8 @@ class WebSocketManager {
             )
             format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
             format.setInteger(MediaFormat.KEY_BIT_RATE, 128000) // 128 kbps
+            format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
             
             mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
             mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -327,6 +331,28 @@ class WebSocketManager {
             // Stop and release encoder
             mediaCodec?.let { codec ->
                 try {
+                    // Signal end of stream
+                    val inputBufferIndex = codec.dequeueInputBuffer(10000)
+                    if (inputBufferIndex >= 0) {
+                        codec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    }
+                    
+                    // Drain all remaining encoded data
+                    val bufferInfo = MediaCodec.BufferInfo()
+                    var outputBufferIndex: Int
+                    do {
+                        outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                        if (outputBufferIndex >= 0) {
+                            val encodedData = codec.getOutputBuffer(outputBufferIndex)
+                            if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                                encodedData.position(bufferInfo.offset)
+                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                mediaMuxer?.writeSampleData(audioTrackIndex, encodedData, bufferInfo)
+                            }
+                            codec.releaseOutputBuffer(outputBufferIndex, false)
+                        }
+                    } while (outputBufferIndex >= 0 && (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0)
+                    
                     codec.stop()
                     codec.release()
                 } catch (e: Exception) {
@@ -384,8 +410,15 @@ class WebSocketManager {
                     
                     // Calculate presentation timestamp based on samples encoded
                     // timestamps are in microseconds
+                    // samplesToWrite is number of individual channel samples (interleaved)
+                    // For proper timestamps, we need to count frames (one sample across all channels)
+                    val framesWritten = samplesToWrite / channels
                     val presentationTimeUs = (totalSamplesEncoded * 1_000_000L) / sampleRate
-                    totalSamplesEncoded += samplesToWrite / channels  // Count frames, not individual channel samples
+                    totalSamplesEncoded += framesWritten
+                    
+                    if (totalSamplesEncoded < 100000) {  // Log first few seconds
+                        Log.d(TAG, "Encoding: samples=$samplesToWrite, frames=$framesWritten, totalFrames=$totalSamplesEncoded, timestamp=${presentationTimeUs}us, rate=$sampleRate, channels=$channels")
+                    }
                     
                     codec.queueInputBuffer(
                         inputBufferIndex, 
@@ -405,6 +438,9 @@ class WebSocketManager {
                 when {
                     outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val newFormat = codec.outputFormat
+                        val formatSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        val formatChannels = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        Log.d(TAG, "Encoder output format: sampleRate=$formatSampleRate, channels=$formatChannels")
                         audioTrackIndex = muxer.addTrack(newFormat)
                         muxer.start()
                         muxerStarted = true

@@ -44,6 +44,7 @@ class WebSocketManager {
     private var mediaMuxer: MediaMuxer? = null
     private var audioTrackIndex = -1
     private var muxerStarted = false
+    private var totalSamplesEncoded = 0L  // Track total samples for correct timestamps
     
     private val _recordingState = MutableStateFlow(false)
     val recordingState: StateFlow<Boolean> = _recordingState.asStateFlow()
@@ -308,6 +309,7 @@ class WebSocketManager {
             mediaMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxerStarted = false
             audioTrackIndex = -1
+            totalSamplesEncoded = 0L
             
             isRecording = true
             _recordingState.value = true
@@ -380,11 +382,16 @@ class WebSocketManager {
                         codecInputBuffer.putShort(pcmData[i])
                     }
                     
+                    // Calculate presentation timestamp based on samples encoded
+                    // timestamps are in microseconds
+                    val presentationTimeUs = (totalSamplesEncoded * 1_000_000L) / sampleRate
+                    totalSamplesEncoded += samplesToWrite / channels  // Count frames, not individual channel samples
+                    
                     codec.queueInputBuffer(
                         inputBufferIndex, 
                         0, 
                         samplesToWrite * 2,  // bytes written
-                        System.nanoTime() / 1000, 
+                        presentationTimeUs, 
                         0
                     )
                 }

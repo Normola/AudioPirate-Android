@@ -24,45 +24,83 @@ class WebSocketViewModel(application: Application) : AndroidViewModel(applicatio
     private var audioService: AudioStreamService? = null
     private var isBound = false
     
+    // Proxy StateFlows that update when service connects
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    
+    private val _recordingState = MutableStateFlow(false)
+    val recordingState: StateFlow<Boolean> = _recordingState.asStateFlow()
+    
+    private val _receivedBytes = MutableStateFlow(0L)
+    val receivedBytes: StateFlow<Long> = _receivedBytes.asStateFlow()
+    
+    private val _messageCount = MutableStateFlow(0L)
+    val messageCount: StateFlow<Long> = _messageCount.asStateFlow()
+    
+    private val _lastMessageTime = MutableStateFlow<String?>(null)
+    val lastMessageTime: StateFlow<String?> = _lastMessageTime.asStateFlow()
+    
+    private val _errorDetails = MutableStateFlow<String?>(null)
+    val errorDetails: StateFlow<String?> = _errorDetails.asStateFlow()
+    
+    private val _audioGain = MutableStateFlow(1.0f)
+    val audioGain: StateFlow<Float> = _audioGain.asStateFlow()
+    
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as AudioStreamService.AudioStreamBinder
             audioService = binder.getService()
             webSocketManager = binder.getWebSocketManager()
             isBound = true
+            
+            // Start collecting from the real WebSocketManager flows
+            viewModelScope.launch {
+                webSocketManager?.connectionState?.collect { _connectionState.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.recordingState?.collect { _recordingState.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.receivedBytes?.collect { _receivedBytes.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.messageCount?.collect { _messageCount.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.lastMessageTime?.collect { _lastMessageTime.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.errorDetails?.collect { _errorDetails.value = it }
+            }
+            viewModelScope.launch {
+                webSocketManager?.audioGain?.collect { _audioGain.value = it }
+            }
         }
         
         override fun onServiceDisconnected(name: ComponentName?) {
             audioService = null
             webSocketManager = null
             isBound = false
+            _connectionState.value = ConnectionState.Disconnected
         }
     }
     
-    private fun getWebSocketManager(): WebSocketManager {
-        if (webSocketManager == null) {
-            // Start and bind to service
-            val intent = Intent(getApplication(), AudioStreamService::class.java)
-            getApplication<Application>().startService(intent)
-            getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        }
-        return webSocketManager ?: throw IllegalStateException("WebSocketManager not initialized")
+    init {
+        // Start and bind to service immediately
+        val intent = Intent(getApplication(), AudioStreamService::class.java)
+        getApplication<Application>().startService(intent)
+        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
     
-    val connectionState: StateFlow<ConnectionState>
-        get() = webSocketManager?.connectionState ?: MutableStateFlow(ConnectionState.Disconnected)
-    val recordingState: StateFlow<Boolean>
-        get() = webSocketManager?.recordingState ?: MutableStateFlow(false)
-    val receivedBytes: StateFlow<Long>
-        get() = webSocketManager?.receivedBytes ?: MutableStateFlow(0L)
-    val messageCount: StateFlow<Long>
-        get() = webSocketManager?.messageCount ?: MutableStateFlow(0L)
-    val lastMessageTime: StateFlow<String?>
-        get() = webSocketManager?.lastMessageTime ?: MutableStateFlow(null)
-    val errorDetails: StateFlow<String?>
-        get() = webSocketManager?.errorDetails ?: MutableStateFlow(null)
-    val audioGain: StateFlow<Float>
-        get() = webSocketManager?.audioGain ?: MutableStateFlow(1.0f)
+    private suspend fun getWebSocketManager(): WebSocketManager {
+        // Wait for service to be connected
+        var attempts = 0
+        while (webSocketManager == null && attempts < 50) {
+            kotlinx.coroutines.delay(100)
+            attempts++
+        }
+        return webSocketManager ?: throw IllegalStateException("WebSocketManager not initialized after waiting")
+    }
     
     private val _wsUrl = MutableStateFlow("ws://")
     val wsUrl: StateFlow<String> = _wsUrl.asStateFlow()

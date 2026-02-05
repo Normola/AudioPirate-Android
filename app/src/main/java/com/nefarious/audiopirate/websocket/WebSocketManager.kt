@@ -357,6 +357,9 @@ class WebSocketManager {
     }
     
     private fun encodeAudioData(pcmData: ShortArray) {
+        // Double-check recording state to avoid race conditions
+        if (!isRecording) return
+        
         val codec = mediaCodec ?: return
         val muxer = mediaMuxer ?: return
         
@@ -391,21 +394,24 @@ class WebSocketManager {
             val bufferInfo = MediaCodec.BufferInfo()
             var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
             
-            while (outputBufferIndex >= 0) {
-                if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    val newFormat = codec.outputFormat
-                    audioTrackIndex = muxer.addTrack(newFormat)
-                    muxer.start()
-                    muxerStarted = true
-                    Log.d(TAG, "Muxer started with track index: $audioTrackIndex")
-                } else {
-                    val encodedData = codec.getOutputBuffer(outputBufferIndex)
-                    if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
-                        encodedData.position(bufferInfo.offset)
-                        encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                        muxer.writeSampleData(audioTrackIndex, encodedData, bufferInfo)
+            while (outputBufferIndex >= 0 || outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                when {
+                    outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val newFormat = codec.outputFormat
+                        audioTrackIndex = muxer.addTrack(newFormat)
+                        muxer.start()
+                        muxerStarted = true
+                        Log.d(TAG, "Muxer started with track index: $audioTrackIndex")
                     }
-                    codec.releaseOutputBuffer(outputBufferIndex, false)
+                    outputBufferIndex >= 0 -> {
+                        val encodedData = codec.getOutputBuffer(outputBufferIndex)
+                        if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                            encodedData.position(bufferInfo.offset)
+                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(audioTrackIndex, encodedData, bufferInfo)
+                        }
+                        codec.releaseOutputBuffer(outputBufferIndex, false)
+                    }
                 }
                 
                 outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)

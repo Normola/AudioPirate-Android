@@ -32,6 +32,7 @@ fun StreamScreen(
     val errorDetails by viewModel.errorDetails.collectAsState()
     val wsUrl by viewModel.wsUrl.collectAsState()
     val password by viewModel.password.collectAsState()
+    val audioGain by viewModel.audioGain.collectAsState()
     
     // Set initial URL, password and auto-connect if requested
     LaunchedEffect(initialUrl, initialPassword, autoConnect) {
@@ -193,37 +194,6 @@ fun StreamScreen(
                 }
             }
             
-            // Send Message (for debugging/testing)
-            if (connectionState is ConnectionState.Connected) {
-                var testMessage by remember { mutableStateOf("") }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = testMessage,
-                        onValueChange = { testMessage = it },
-                        label = { Text("Send message") },
-                        placeholder = { Text("Test message") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    Button(
-                        onClick = {
-                            if (testMessage.isNotBlank()) {
-                                viewModel.sendMessage(testMessage)
-                                testMessage = ""
-                            }
-                        },
-                        enabled = testMessage.isNotBlank()
-                    ) {
-                        Icon(Icons.Filled.Send, contentDescription = "Send")
-                    }
-                }
-            }
-            
             // Recording Controls
             if (connectionState is ConnectionState.Connected) {
                 HorizontalDivider()
@@ -282,6 +252,63 @@ fun StreamScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Stop")
                             }
+                        }
+                    }
+                }
+                
+                // Audio Gain Control
+                HorizontalDivider()
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Audio Volume",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "${(audioGain * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        
+                        Slider(
+                            value = audioGain,
+                            onValueChange = { viewModel.setAudioGain(it) },
+                            valueRange = 0.0f..3.0f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "0%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "100%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "300%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

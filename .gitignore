@@ -89,3 +89,4 @@ lint/tmp/
 
 # Mac
 .DS_Store
+.kotlin/sessions/kotlin-compiler-*.salive

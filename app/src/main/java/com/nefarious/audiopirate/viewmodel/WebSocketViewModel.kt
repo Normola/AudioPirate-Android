@@ -22,6 +22,7 @@ class WebSocketViewModel(application: Application) : AndroidViewModel(applicatio
     val messageCount: StateFlow<Long> = webSocketManager.messageCount
     val lastMessageTime: StateFlow<String?> = webSocketManager.lastMessageTime
     val errorDetails: StateFlow<String?> = webSocketManager.errorDetails
+    val audioGain: StateFlow<Float> = webSocketManager.audioGain
     
     private val _wsUrl = MutableStateFlow("ws://")
     val wsUrl: StateFlow<String> = _wsUrl.asStateFlow()
@@ -83,6 +84,10 @@ class WebSocketViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             webSocketManager.sendMessage(message)
         }
+    }
+    
+    fun setAudioGain(gain: Float) {
+        webSocketManager.setAudioGain(gain)
     }
     
     override fun onCleared() {

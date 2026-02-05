@@ -24,15 +24,36 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    
+    - name: Cache Gradle wrapper
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/wrapper
+          ~/.gradle/caches
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Cache build outputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          .gradle
+          build
+          app/build
+        key: ${{ runner.os }}-build-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-build-
         
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Run Lint
-      run: ./gradlew lint
+      run: ./gradlew lint --build-cache --configuration-cache
       
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --build-cache --configuration-cache
       
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
@@ -62,12 +83,33 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    
+    - name: Cache Gradle wrapper
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/wrapper
+          ~/.gradle/caches
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Cache build outputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          .gradle
+          build
+          app/build
+        key: ${{ runner.os }}-build-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-build-
         
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Run Unit Tests
-      run: ./gradlew test
+      run: ./gradlew test --build-cache --configuration-cache
       
     - name: Upload Test Results
       if: always()
@@ -93,29 +135,84 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    
+    - name: Cache Gradle wrapper
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/wrapper
+          ~/.gradle/caches
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Cache build outputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          .gradle
+          build
+          app/build
+        key: ${{ runner.os }}-build-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-build-
         
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Build Release APK
-      run: ./gradlew assembleRelease
+      run: ./gradlew assembleDebug --build-cache --configuration-cache
       
     - name: Generate version tag
       id: version
       run: echo "TAG=v$(date +'%Y.%m.%d')-${{ github.run_number }}" >> $GITHUB_OUTPUT
+    
+    - name: Get previous tag
+      id: previous_tag
+      run: |
+        PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        echo "PREV_TAG=$PREV_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        if [ -n "${{ steps.previous_tag.outputs.PREV_TAG }}" ]; then
+          COMMITS=$(git log ${{ steps.previous_tag.outputs.PREV_TAG }}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        else
+          COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -10)
+        fi
+        
+        cat << EOF > release_notes.md
+        ## 🚀 What's New
+        
+        Automated release from CI/CD pipeline
+        
+        ### 📝 Changes
+        $COMMITS
+        
+        ### 📊 Build Information
+        - **Version**: ${{ steps.version.outputs.TAG }}
+        - **Commit**: ${{ github.sha }}
+        - **Branch**: ${{ github.ref_name }}
+        - **Build**: #${{ github.run_number }}
+        - **Date**: $(date +'%Y-%m-%d %H:%M:%S UTC')
+        
+        ### 📦 Installation
+        Download the APK and install on your Android device (requires enabling "Install from Unknown Sources")
+        EOF
+        
+        echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+        cat release_notes.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
       
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.version.outputs.TAG }}
         name: Release ${{ steps.version.outputs.TAG }}
-        body: |
-          Automated release from CI/CD pipeline
-          
-          **Commit**: ${{ github.sha }}
-          **Branch**: ${{ github.ref_name }}
-          **Run**: ${{ github.run_number }}
+        body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
         files: |
-          app/build/outputs/apk/release/app-release-unsigned.apk
+          app/build/outputs/apk/debug/app-debug.apk
         draft: false
         prerelease: false
+        generate_release_notes: true

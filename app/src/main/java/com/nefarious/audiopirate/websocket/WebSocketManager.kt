@@ -361,20 +361,30 @@ class WebSocketManager {
         val muxer = mediaMuxer ?: return
         
         try {
-            // Convert ShortArray to ByteBuffer
-            val inputBuffer = ByteBuffer.allocate(pcmData.size * 2)
-            for (sample in pcmData) {
-                inputBuffer.putShort(sample)
-            }
-            inputBuffer.flip()
-            
-            // Feed data to encoder
+            // Feed data to encoder in chunks that fit the buffer
             val inputBufferIndex = codec.dequeueInputBuffer(10000)
             if (inputBufferIndex >= 0) {
                 val codecInputBuffer = codec.getInputBuffer(inputBufferIndex)
-                codecInputBuffer?.clear()
-                codecInputBuffer?.put(inputBuffer)
-                codec.queueInputBuffer(inputBufferIndex, 0, inputBuffer.limit(), System.nanoTime() / 1000, 0)
+                if (codecInputBuffer != null) {
+                    codecInputBuffer.clear()
+                    
+                    // Calculate how much data we can fit (buffer capacity / 2 for shorts)
+                    val maxSamples = codecInputBuffer.capacity() / 2
+                    val samplesToWrite = minOf(pcmData.size, maxSamples)
+                    
+                    // Write samples to buffer
+                    for (i in 0 until samplesToWrite) {
+                        codecInputBuffer.putShort(pcmData[i])
+                    }
+                    
+                    codec.queueInputBuffer(
+                        inputBufferIndex, 
+                        0, 
+                        samplesToWrite * 2,  // bytes written
+                        System.nanoTime() / 1000, 
+                        0
+                    )
+                }
             }
             
             // Get encoded data

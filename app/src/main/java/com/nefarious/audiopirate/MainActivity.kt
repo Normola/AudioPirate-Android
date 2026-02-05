@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
@@ -51,7 +52,7 @@ fun AudioPirateApp() {
                 listOf(
                     NavigationItem("home", "Home", Icons.Filled.Home),
                     NavigationItem("stream", "Stream", Icons.Filled.Wifi),
-                    NavigationItem("downloads", "Downloads", Icons.Filled.Download),
+                    NavigationItem("downloads", "Recordings", Icons.Filled.Folder),
                     NavigationItem("settings", "Settings", Icons.Filled.Settings)
                 ).forEach { item ->
                     NavigationBarItem(

@@ -244,6 +244,7 @@ class WebSocketManager {
             
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closing: $code $reason")
+                stopRecording()
                 webSocket.close(1000, null)
                 _connectionState.value = ConnectionState.Disconnected
             }
